@@ -8,7 +8,9 @@ import numpy as np
 import plotly
 from plotly.graph_objs import  Layout,Scatter3d
 import plotly.graph_objs as go
-import seaborn as sns; sns.set()
+#import seaborn as sns; sns.set()
+from numpy import zeros, sqrt, where, pi, mean, arange, histogram
+
 def pairCorrelationFunction_3D(x, y, z, S, rMax, dr):
     """Compute the three-dimensional pair correlation function for a set of
     spherical particles contained in a cube with side length S.  This simple
@@ -29,7 +31,7 @@ def pairCorrelationFunction_3D(x, y, z, S, rMax, dr):
                         spherical shells used to compute g(r)
         reference_indices   indices of reference particles
     """
-    from numpy import zeros, sqrt, where, pi, mean, arange, histogram
+
 
     # Find particles which are close enough to the cube center that a sphere of radius
     # rMax will not cross any face of the cube
@@ -81,16 +83,16 @@ def pairCorrelationFunction_3D(x, y, z, S, rMax, dr):
 
 def set_mol_info():
     pass
-    return
+    #return
 
-def dbscan_w_plot(all_pos):
+def dbscan_func(all_pos, mol_list, col_pos, col_neg):
     X = all_pos
-    #= StandardScaler().fit_transform(all_pos)
+    # = StandardScaler().fit_transform(all_pos)
 
     # #############################################################################
     # Compute DBSCAN
 
-    db = DBSCAN( eps=0.8 ,min_samples = 4 ).fit(X)
+    db = DBSCAN(eps=0.8, min_samples=4).fit(X)
     core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
     core_samples_mask[db.core_sample_indices_] = True
     labels = db.labels_
@@ -105,8 +107,8 @@ def dbscan_w_plot(all_pos):
     # #############################################################################
     # Plot result
 
-    new_xyz = [] #np.zeros((X.shape[0],3))
-    new_cols = [] #np.zeros((X.shape[0], 4))
+    new_xyz = []  # np.zeros((X.shape[0],3))
+    new_cols = []  # np.zeros((X.shape[0], 4))
     new_labels = []
     new_op = []
 
@@ -117,8 +119,8 @@ def dbscan_w_plot(all_pos):
     unique_labels = set(labels)
     colors = [plt.cm.Spectral(each) for each in np.linspace(0, 1, len(unique_labels))]
 
-    #print("Color variety: ", len(colors))
-    #print(colors)
+    # print("Color variety: ", len(colors))
+    # print(colors)
 
     for k, col in zip(unique_labels, colors):
         if k == -1:
@@ -130,33 +132,55 @@ def dbscan_w_plot(all_pos):
         xy = X[class_member_mask & core_samples_mask]
 
         for tmp_xy in xy:
-            new_xyz.append(tmp_xy)
-            #tmp_color = list(col)
-            #tmp_color = [tmp_color[0],tmp_color[1],tmp_color[2],0.3]
-            new_cols.append(tuple(col))
+            _id, dh, tds, dg = find_mol_id(tmp_xy, mol_list)
+            # new_xyz.append(tmp_xy)
+
             if k == -1:
-                new_labels.append('Unclustered')
-                new_op.append(float(0.3))
+                pass
+                # new_cols.append(tuple(col))
+                # new_labels.append('Unclustered')
+                # new_op.append(float(0.3))
             else:
-                new_labels.append('Cluster: '+ str(k))
+                #col_pos = [255, 204, 0, 1]
+                #col_neg = [204, 0, 153, 1]
+                # new_cols.append(tuple(col))
+                if float(dg) < 0.0:
+                    new_cols.append(col_pos)
+                else:
+                    new_cols.append(col_neg)
+                new_xyz.append(tmp_xy)
+                new_labels.append('Cluster: ' + str(k) + '<br>id: ' + _id \
+                                  + '<br>dH: ' + dh + '<br>TdS: ' + tds + '<br>dG: ' + dg)
                 new_op.append(float(1.0))
 
-
-        ax.scatter(xy[:, 0], xy[:, 1],xy[:, 2], 'o', c=tuple(col),
+        ax.scatter(xy[:, 0], xy[:, 1], xy[:, 2], 'o', c=tuple(col),
                    edgecolors='k', s=14)
-
 
         xy = X[class_member_mask & ~core_samples_mask]
 
         for tmp_xy in xy:
-            new_xyz.append(tmp_xy)
-            #col = tuple(col[0],col[1],col[2],0.3)
-            new_cols.append(tuple(col))
+            # print(tmp_xy)
+            _id, dh, tds, dg = find_mol_id(tmp_xy, mol_list)
+
+            # new_xyz.append(tmp_xy)
+
             if k == -1:
-                new_labels.append('Unclustered')
-                new_op.append(float(0.3))
+                pass
+                # new_cols.append(tuple(col))
+                # new_labels.append('Unclustered')
+                # new_op.append(float(0.3))
             else:
-                new_labels.append('Cluster: '+ str(k))
+
+                #col_pos = [255, 204, 0, 1]
+                #col_neg = [204, 0, 153, 1]
+                # new_cols.append(tuple(col))
+                if float(dg) < 0.0:
+                    new_cols.append(col_pos)
+                else:
+                    new_cols.append(col_neg)
+                new_xyz.append(tmp_xy)
+                new_labels.append('Cluster: ' + str(k) + '<br>id: ' + _id \
+                                  + '<br>dH: ' + dh + '<br>TdS: ' + tds + '<br>dG: ' + dg)
                 new_op.append(float(1.0))
 
         ax.scatter(xy[:, 0], xy[:, 1], xy[:, 2], 'o', c=tuple(col),
@@ -165,30 +189,53 @@ def dbscan_w_plot(all_pos):
     new_xyz = np.asarray(new_xyz)
     print(len(new_op))
 
-    #names = set_mol_info(X)
+    # names = set_mol_info(X)
     remove_idx = []
-    for lbl_tmp, opa_tmp, col_tmp, xyz_tmp, idx_tmp in zip(new_labels,new_op,new_cols,new_xyz, range(len(new_labels))):
+    for lbl_tmp, opa_tmp, col_tmp, xyz_tmp, idx_tmp in zip(new_labels, new_op, new_cols, new_xyz,
+                                                           range(len(new_labels))):
         if lbl_tmp != 'Unclustered':
             remove_idx.append(idx_tmp)
 
-    new_labels = new_labels.pop(for r in remove_idx)
-    new_xyz =
-    new_cols =
-    new_op =
+    #    new_labels = new_labels.pop(for r in remove_idx)
+    #    new_xyz =
+    #    new_cols =
+    #    new_op =
+    return new_xyz, new_cols, new_labels, new_op
 
-    plotly.offline.plot({
-        "data": [Scatter3d(x=new_xyz[:, 0], y=new_xyz[:, 1], z=new_xyz[:, 2],
-                           marker=dict(color=new_cols,line = dict(width=1)),
-                           mode='markers',text =new_labels , opacity = dict(opacity = new_op) )],  #
+def dbscan_w_plot(all_pos , mol_list = None ,all_pos_inactive =None ,mol_list_inactive =None):
+    new_xyz, new_cols, new_labels, new_op = dbscan_func(all_pos, mol_list , tuple([255/255.0, 204/255.0, 0, 1]),tuple([204/255.0, 0, 153/255.0, 1]) )
+
+    trace1 = go.Scatter3d(x=new_xyz[:, 0], y=new_xyz[:, 1], z=new_xyz[:, 2], name= 'Active',
+                           marker=dict(color=new_cols,line = dict(width=1) , symbol= 'diamond'),
+                           mode='markers',text = new_labels , opacity = dict(opacity = new_op) )
+
+    new_xyz, new_cols, new_labels, new_op = dbscan_func(all_pos_inactive, mol_list_inactive,tuple([255/255.0, 153/255.0, 0, 1]),tuple([204/255.0, 0, 204/255.0, 1]))
+
+    trace2 = go.Scatter3d(x=new_xyz[:, 0], y=new_xyz[:, 1], z=new_xyz[:, 2],name= 'Inactive',
+                          marker=dict(color=new_cols, line=dict(width=1)),
+                          mode='markers', text=new_labels, opacity=dict(opacity=new_op))
+
+    data = [trace1,trace2]
+
+    plotly.offline.plot(
+        data,  #
         #"data" : plotly_data ,
+        {
         "layout": Layout(title="Active protein water molecules heatmap")
     })
 
-    plt.title('Estimated number of clusters: %d' % n_clusters_)
+    #plt.title('Estimated number of clusters: %d' % n_clusters_)
 
 
     ########################################################################################
 
+def find_mol_id(xyz , mol_list):
+    for mol in mol_list:
+        b = np.array([mol.x , mol.y , mol.z])
+        #print(b)
+        dist = np.linalg.norm(xyz - b)
+        if dist < 0.001:
+            return mol._id , str(mol.dh) , str(mol.tds), str(mol.dg)
 
 def distance_matrix(molecule_pop_lst_active, all_pos):
     one_prot = np.zeros(int(molecule_pop_lst_active[0]))

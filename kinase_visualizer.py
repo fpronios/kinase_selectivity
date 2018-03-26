@@ -16,7 +16,7 @@ import scipy as sp
 from scipy import stats
 from matplotlib.widgets import CheckButtons
 import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()
+#import seaborn as sns; sns.set()
 
 
 from rdf_pdf import * #pairCorrelationFunction_3D
@@ -82,12 +82,15 @@ def find_average(g_r_lst, r_lst, names_lst , minimax = True):
 
 class w_mol:
 
-    def __init__(self, x,y,z,prot_name, _id):
+    def __init__(self, x,y,z,prot_name, _id , dh ,tds , dg):
         self.x = x
         self.y = y
         self.z = z
         self._id = _id
         self.prot_name = prot_name
+        self.dh = dh
+        self.tds = tds
+        self.dg = dg
 
 
 colum_offset = 12
@@ -137,12 +140,17 @@ for sheet in wb.sheets():
                     y_value = (sheet.cell(row, col + 1).value)
                     z_value = (sheet.cell(row, col + 2).value)
 
+
                     #print('x:',x_value,' y:',y_value,' z:',z_value)
                     tmp_arr[0] = float(x_value)
                     tmp_arr[1] = float(y_value)
                     tmp_arr[2] = float(z_value)
+                    dh_val = (sheet.cell(row, col + 5).value)
+                    tds_val = (sheet.cell(row, col + 6).value)
+                    dg_val = (sheet.cell(row, col + 7).value)
 
-                    mol_obj_active.append(w_mol(x_value,y_value,z_value,names_lst_active[mol_idx],names_lst_active[mol_idx] + str(row)))
+                    mol_obj_active.append(w_mol(x_value,y_value,z_value,names_lst_active[mol_idx],names_lst_active[mol_idx] +'_'+ str(row),\
+                                                float(dh_val),float(tds_val),float(dg_val)))
                     #print(tmp_arr)
                     tmp_buff.append(tmp_arr)
                     mol_pos_active[mol_idx].append(tmp_arr)
@@ -181,8 +189,13 @@ for sheet in wb.sheets():
                     tmp_arr[1] = float(y_value)
                     tmp_arr[2] = float(z_value)
 
-                    mol_obj_inactive.append(w_mol(x_value, y_value, z_value, names_lst_inactive[mol_idx], names_lst_inactive[mol_idx] + str(row)))
-                    # print(tmp_arr)
+                    dh_val = (sheet.cell(row, col + 5).value)
+                    tds_val = (sheet.cell(row, col + 6).value)
+                    dg_val = (sheet.cell(row, col + 7).value)
+
+                    mol_obj_inactive.append(w_mol(x_value, y_value, z_value, names_lst_inactive[mol_idx],names_lst_inactive[mol_idx] + '_' + str(row), \
+                                                float(dh_val), float(tds_val), float(dg_val)))
+
                     tmp_buff.append(tmp_arr)
                     mol_pos_inactive[mol_idx].append(tmp_arr)
 
@@ -218,7 +231,7 @@ for moll in mol_obj_inactive:
 
 
 # input pos matrix
-dbscan_w_plot(all_pos_active)
+dbscan_w_plot(all_pos_active, mol_obj_active ,all_pos_inactive, mol_obj_inactive)
 
 #X = all_pos#= StandardScaler().fit_transform(all_pos)
 # Particle setup
@@ -238,6 +251,29 @@ g_r_lst_active , r_lst_active = create_rdf(molecule_pop_lst_active, all_pos_acti
 g_r_lst_inactive , r_lst_inactive = create_rdf(molecule_pop_lst_inactive, all_pos_inactive, domain_size , dr , particle_radius ,rMax,dr_set,line_smoothing)
 
 # Visualize
+data_a = []
+
+for r_iter, g_iter , name_iter in zip(r_lst_active, g_r_lst_active, names_lst_active):
+
+    data_a.append(go.Scatter(x = r_iter, y = g_iter, name = name_iter))
+
+layout = dict(title = 'Active RDF')
+fig = dict(data = data_a, layout = layout)
+plotly.offline.plot(fig, filename='active_rdf.html')
+
+data_i = []
+for r_iter, g_iter , name_iter in zip(r_lst_inactive, g_r_lst_inactive, names_lst_inactive):
+    data_i.append(go.Scatter(x = r_iter, y = g_iter, name = name_iter))
+
+layout = dict(title = 'Inactive RDF')
+fig = dict(data = data_i, layout = layout)
+plotly.offline.plot(fig, filename='inactive_rdf.html')
+
+#layout = dict(title = 'Inactive RDF')
+#fig = dict(data = , layout = layout)
+#plotly.offline.plot(fig, filename='inactive_rdf.html')
+
+
 
 fig, ax = plt.subplots()
 line_lst = []
@@ -256,7 +292,7 @@ plt.ylim( (0, 1.6 * domain_size))
 #plt.plot(r, g_r)#, color='black')
 plt.subplots_adjust(left=0.2)
 
-leg = ax.legend(loc='top right', fancybox=True, shadow=True)
+leg = ax.legend(loc='upper right', fancybox=True, shadow=True)
 #leg.get_frame().set_alpha(0.4)
 
 rax = plt.axes([0.05, 0.3, 0.1, 0.35])
@@ -325,8 +361,6 @@ ax = fig6.add_subplot(111, projection='3d')
 ax.scatter(x, y, z, c=density)
 
 ax.grid(True)
-
-
 
 
 #plotly.offline.plot({
