@@ -21,7 +21,9 @@ import matplotlib.pyplot as plt
 #import seaborn as sns; sns.set()
 import matplotlib as mpl
 #mpl.style.use('classic')
-
+from sklearn.model_selection import cross_validate, KFold
+from sklearn import tree
+import graphviz
 #from sheatheer_jones import *
 
 from rdf_pdf import * #pairCorrelationFunction_3D
@@ -99,7 +101,8 @@ class w_mol:
         self.dg = dg
 
 class molecule_set:
-
+    prot_names_inact = []
+    prot_names_act = []
     active_molecules = []
     inactive_molecules = []
 
@@ -439,8 +442,19 @@ class molecule_set:
 
         #return X_r, Y_r
 
+    def get_per_protein_ctc(self):
+        molecule_set.prot_names_inact = list(set([prot.prot_name for prot in molecule_set.inactive_molecules]))
+        molecule_set.prot_names_act = list(set([prot.prot_name for prot in molecule_set.active_molecules]))
+        print(molecule_set.prot_names_inact)
+        print(molecule_set.prot_names_act)
 
+        usfl_act = [[] for i in range(len(molecule_set.prot_names_act))]
+        usfl_inact = [[] for i in range(len(molecule_set.prot_names_inact))]
 
+        for prot, i in enumerate(molecule_set.prot_names_act):
+            usfl_act[i].append([mol for mol in molecule_set.active_molecules if (mol.protein_name == prot)])
+
+        print(usfl_act)
 
 wm = molecule_set()
 wm.load_dataset()
@@ -448,6 +462,44 @@ wm.load_dataset()
 center = np.mean(wm.get_xyz('all'),axis=0)
 
 #print ('Center: ', center)
+
+inactive_rows = wm.get_all_ext(wm.inactive_molecules).shape[0]
+inactive_cols = wm.get_all_ext(wm.inactive_molecules).shape[1]
+active_rows = wm.get_all_ext(wm.active_molecules).shape[0]
+
+tot_mols = np.ones((inactive_rows + active_rows,inactive_cols+1))
+tot_mols[:inactive_rows,:-1] =  wm.get_all_ext(wm.inactive_molecules)
+tot_mols[:inactive_rows,-1] = 0
+
+tot_mols[inactive_rows:,:-1] = wm.get_all_ext(wm.active_molecules)
+tot_mols[inactive_rows:,-1] = 1
+
+
+wm.get_per_protein_ctc()
+#prot_names_inact = list(set([prot.prot_name for prot in wm.inactive_molecules]))
+#prot_names_act = list(set([prot.prot_name for prot in wm.active_molecules]))
+
+#wm.prot_names_act = prot_names_act
+#wm.prot_names_inact = prot_names_inact
+
+
+
+
+#print(tot_mols)
+
+clf = tree.DecisionTreeClassifier()
+clf = clf.fit(tot_mols[:, :-1], tot_mols[:,-1])
+dot_data = tree.export_graphviz(clf, out_file=None)
+graph = graphviz.Source(dot_data)
+graph.render("iris")
+
+dot_data = tree.export_graphviz(clf, out_file=None,
+                         #feature_names=iris.feature_names,
+                         #class_names=iris.target_names,
+                         filled=True, rounded=True,
+                         special_characters=True)
+graph = graphviz.Source(dot_data)
+graph.render("iris")
 
 print(wm.get_com())
 
@@ -458,13 +510,13 @@ wm.plot_PCA_6D(wm.active_molecules,wm.inactive_molecules)
 
 wm.plot_PCA_6D(wm.mols_distance_from_com(wm.active_molecules),wm.mols_distance_from_com(wm.inactive_molecules))
 
-wm.plot_LDA(wm.active_molecules,wm.inactive_molecules)
+#wm.plot_LDA(wm.active_molecules,wm.inactive_molecules)
 
 a_pca, ia_pca = wm.get_molecules_from_PCA_area(-20,-3,-3,15)
 
 
 
-
+wm.get_per_protein_ctc()
 
 
 
