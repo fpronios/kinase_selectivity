@@ -1,5 +1,7 @@
 from xlrd import open_workbook
 from scipy.interpolate import spline
+from mayavi import mlab
+import matplotlib.tri as mtri
 import plotly
 from plotly.graph_objs import  Layout,Scatter3d
 from mpl_toolkits.mplot3d import proj3d
@@ -25,6 +27,7 @@ from sklearn.model_selection import cross_validate, KFold
 from sklearn import tree
 import graphviz
 #from sheatheer_jones import *
+from scipy.spatial import Delaunay
 
 from rdf_pdf import * #pairCorrelationFunction_3D
 
@@ -246,8 +249,43 @@ class molecule_set:
             all_pos = np.vstack((all_pos_active, all_pos_inactive))
             return all_pos
 
+    def get_dgs(self, act):
+
+        all_pos_active = np.zeros([int(len(molecule_set.active_molecules)), 3])
+        np_names_active = np.zeros([int(len(molecule_set.active_molecules)), 1])
+        idx = 0
+        for moll in molecule_set.active_molecules:
+            # print (moll.x, moll.y ,moll.z)
+            all_pos_active[idx][0] = moll.dg
+            all_pos_active[idx][1] = moll.tds
+            all_pos_active[idx][2] = moll.dh
+            idx += 1
+
+        all_pos_inactive = np.zeros([int(len(molecule_set.inactive_molecules)),3])
+        np_names_inactive = np.zeros([int(len(molecule_set.inactive_molecules)),1])
+        idx = 0
+        for moll in molecule_set.inactive_molecules:
+
+            #print (moll.x, moll.y ,moll.z)
+            all_pos_inactive[idx][0] = moll.dg
+            all_pos_inactive[idx][1] = moll.tds
+            all_pos_inactive[idx][2] = moll.dh
+            idx += 1
+
+
+        if act == 'active':
+            return all_pos_active
+        elif act == 'inactive':
+            return all_pos_inactive
+        else:
+            all_pos = np.vstack((all_pos_active, all_pos_inactive))
+            return all_pos
+
     def get_com(self):
         return np.mean((self.get_xyz('all')),axis=0)
+
+    def get_mean_enrg(self):
+        return  np.mean((self.get_dgs('all')), axis=0)
 
     def plot_KDE_2D_per_mol(self, mol_obj, label):
         xyz = self.get_com()
@@ -272,14 +310,179 @@ class molecule_set:
 
         plt.legend(loc='upper left')
 
+        return X
+
     def plot_KDE_2D(self):
         self.plot_KDE_2D_per_mol(molecule_set.active_molecules, 'Active')
-        self.plot_KDE_2D_per_mol(molecule_set.inactive_molecules, 'Active')
+        self.plot_KDE_2D_per_mol(molecule_set.inactive_molecules, 'Inactive')
 
         plt.legend(loc='upper left')
         plt.ylabel('Density')
         plt.xlabel(r'$\AA$')
         plt.title('KDE of H2O distances from center')
+        plt.show()
+
+    def plot_PCF_by_prot(self):
+        molecule_set.prot_names_inact = list(set([prot.prot_name for prot in molecule_set.inactive_molecules]))
+        molecule_set.prot_names_act = list(set([prot.prot_name for prot in molecule_set.active_molecules]))
+        #self.plot_KDE_2D_per_mol(molecule_set.active_molecules, 'Active')
+        #self.plot_KDE_2D_per_mol(molecule_set.inactive_molecules, 'Inactive')
+
+        self.get_PCF_ltt_by_prot(molecule_set.active_molecules,molecule_set.prot_names_act, 'Active')
+        self.get_PCF_ltt_by_prot(molecule_set.inactive_molecuvtkles, molecule_set.prot_names_inact, 'Inactive')
+
+        plt.legend(loc='upper left')
+        plt.ylabel('Density')
+        plt.xlabel(r'$\AA$')
+        plt.title('KDE of H2O distances from center')
+        plt.show()
+
+
+    def get_PCF_ltt_by_prot(self,mol_obj, prot_names,label):
+        xyz = self.get_com()
+        for prot in prot_names:
+            X = []
+            IDX = []
+            for idx, mol in enumerate(mol_obj):
+                b = np.array([mol.x, mol.y, mol.z])
+                # print(b)
+                dist = np.linalg.norm(xyz - b)
+                if dist < 10:
+                    X.append(dist)
+                    IDX.append(idx)
+
+            mols_ltt = len(X)
+            mol_pcf = [[] for i in range(mols_ltt)]
+            for idx, mol in enumerate(mol_obj):
+                if idx in IDX:
+                    for idx_inner, mol_inner in enumerate(mol_obj):
+                        if idx_inner in IDX and idx_inner != idx and mol_inner.prot_name == mol.prot_name and mol.prot_name == prot:
+                            a = np.array([mol.x, mol.y, mol.z])
+                            b = np.array([mol_inner.x, mol_inner.y, mol_inner.z])
+                            # print(b)
+                            dist = np.linalg.norm(a - b)
+
+                            mol_pcf[IDX.index(idx)].append(dist)
+            to_remove = []
+            for idx,  mol_empty_test in enumerate(mol_pcf):
+                if len(mol_empty_test)==0:
+                    #print(idx)
+                    to_remove.append(idx)
+
+            mol_pcf = [i for j, i in enumerate(mol_pcf) if j not in to_remove]
+
+            X = np.array(mol_pcf)
+            print("mol_pcf")
+            X = X.ravel()
+            print(len(X))
+            BW = 1.06 * np.power(np.std(np.asarray(X), axis=0), -0.2) / 2
+            print(BW)
+            for kernel in ['epanechnikov']:  # , 'tophat', 'epanechnikov']:
+                kde = KernelDensity(kernel=kernel, bandwidth=BW).fit(np.asarray(X).reshape(-1, 1))
+                X_plot = np.linspace(0, 25, 10000)[:, np.newaxis]
+                log_dens = kde.score_samples(X_plot)
+                if label == 'Active':
+                    l_type = '-'
+                    c_color = 'r'
+                else:
+                    l_type = '*-'
+                    c_color = 'b'
+                plt.plot(X_plot[:, 0], np.exp(log_dens), c =c_color,
+                         label="{1} BW = '{0:.2f}'".format(BW,  label + ": " + prot))
+
+            plt.legend(loc='upper right', prop={'size': 2})
+
+        return X
+
+    def get_PCF_ltt(self, mol_obj, label):
+        xyz = self.get_com()
+        X = []
+        IDX = []
+        for idx , mol in enumerate(mol_obj):
+            b = np.array([mol.x, mol.y, mol.z])
+            # print(b)
+            dist = np.linalg.norm(xyz - b)
+            if dist < 10:
+                X.append(dist)
+                IDX.append(idx)
+
+        mols_ltt = len(X)
+        mol_pcf = [[] for i in range (mols_ltt)]
+        for idx, mol in enumerate(mol_obj):
+            if idx in IDX:
+                for idx_inner, mol_inner in enumerate(mol_obj):
+                    if idx_inner in IDX and idx_inner != idx:
+                        a = np.array([mol.x, mol.y, mol.z])
+                        b = np.array([mol_inner.x, mol_inner.y, mol_inner.z])
+                        # print(b)
+                        dist = np.linalg.norm(a - b)
+
+                        mol_pcf[IDX.index(idx)].append(dist)
+
+        X = np.array(mol_pcf)
+        print("mol_pcf")
+        X = X.ravel()
+
+        BW = 1.06 * np.power(np.std(np.asarray(X), axis=0), -0.2) / 2
+        print(BW)
+        for kernel in ['epanechnikov']:  # , 'tophat', 'epanechnikov']:
+            kde = KernelDensity(kernel=kernel, bandwidth=BW).fit(np.asarray(X).reshape(-1, 1))
+            X_plot = np.linspace(0, 25, 100000)[:, np.newaxis]
+            log_dens = kde.score_samples(X_plot)
+
+            plt.plot(X_plot[:, 0], np.exp(log_dens), '-',
+                     label="{1} BW = '{0:.2f}'".format(BW, label))
+
+        plt.legend(loc='upper left')
+
+        return  X
+
+
+    def plot_KDE_2D_per_mol_enrg(self, mol_obj, label):
+        xyz = self.get_mean_enrg()
+        X = []
+
+        for mol in mol_obj:
+            b = np.array([mol.dh, mol.tds, mol.dg])
+            # print(b)
+            dist = np.linalg.norm(xyz - b)
+            if np.linalg.norm(xyz) > np.linalg.norm(b) :
+                dist = - dist
+            X.append(mol.dg)
+
+        # Silverman's Rule of Thumb
+        BW = 1.06 * np.power(np.std(np.asarray(X), axis=0), -0.2) / 2
+        print(BW)
+        for kernel in ['epanechnikov']:  # , 'tophat', 'epanechnikov']:
+            kde = KernelDensity(kernel=kernel, bandwidth=BW).fit(np.asarray(X).reshape(-1, 1))
+            X_plot = np.linspace(-25, 25, 10000)[:, np.newaxis]
+            log_dens = kde.score_samples(X_plot)
+
+            plt.plot(X_plot[:, 0], np.exp(log_dens), '-',
+                     label="{1} BW = '{0:.2f}'".format(BW, label))
+
+        plt.legend(loc='upper right')
+
+        return X
+
+    def plot_PCF(self):
+        self.get_PCF_ltt(molecule_set.active_molecules, 'Active')
+        self.get_PCF_ltt(molecule_set.inactive_molecules, 'Inactive')
+
+        plt.legend(loc='upper right')
+        plt.ylabel('Density')
+        plt.xlabel('Energy Delta')
+        plt.title('KDE of H2O distances from mean energies')
+        plt.show()
+
+    def plot_KDE_2D_enrg(self):
+        self.plot_KDE_2D_per_mol_enrg(molecule_set.active_molecules, 'Active')
+        self.plot_KDE_2D_per_mol_enrg(molecule_set.inactive_molecules, 'Inactive')
+
+        plt.legend(loc='upper right')
+        plt.ylabel('Density')
+        plt.xlabel('Energy Delta')
+        plt.title('KDE of H2O distances from mean energies')
         plt.show()
 
     def plot_PCA_6D(self, active, inactive):
@@ -408,6 +611,19 @@ class molecule_set:
 
         return X
 
+    def mols_distance_from_enrg(self,mol_obj):
+        xyz = self.get_mean_enrg()
+        X = []
+
+        for mol in mol_obj:
+            b = np.array([mol.dh, mol.tds, mol.dg])
+            # print(b)
+            dist = np.linalg.norm(xyz - b)
+            if dist < 10.0:
+                X.append(mol)
+
+        return X
+
     def plot_LDA(self, active, inactive):
         X = []
         Y = []
@@ -463,6 +679,9 @@ center = np.mean(wm.get_xyz('all'),axis=0)
 
 #print ('Center: ', center)
 
+
+
+
 inactive_rows = wm.get_all_ext(wm.inactive_molecules).shape[0]
 inactive_cols = wm.get_all_ext(wm.inactive_molecules).shape[1]
 active_rows = wm.get_all_ext(wm.active_molecules).shape[0]
@@ -475,31 +694,68 @@ tot_mols[inactive_rows:,:-1] = wm.get_all_ext(wm.active_molecules)
 tot_mols[inactive_rows:,-1] = 1
 
 
-wm.get_per_protein_ctc()
+#src = mlab.pipeline.scalar_field(tot_mols[inactive_rows:,:3])
+
+mlab.pipeline.iso_surface(tot_mols[inactive_rows:,:3], opacity=0.4)
+#mlab.pipeline.iso_surface(src, contours=[s.max()-0.1*s.ptp(), ],)
+
+mlab.show()
+
+#wm.get_PCF_ltt(wm.active_molecules, "Test")
+#wm.plot_PCF_by_prot()
+#wm.plot_PCF()
+
+#wm.get_per_protein_ctc()
 #prot_names_inact = list(set([prot.prot_name for prot in wm.inactive_molecules]))
 #prot_names_act = list(set([prot.prot_name for prot in wm.active_molecules]))
 
 #wm.prot_names_act = prot_names_act
 #wm.prot_names_inact = prot_names_inact
+tri = Delaunay(tot_mols[inactive_rows:,:-4], 3)
+
+#print(tri.simplices)
+
+#layout = dict(title = 'Active RDF')
+#fig = dict(data = (points[:,0], points[:,1], tri.simplices.copy()), layout = layout)
+#plotly.offline.plot(fig, filename='delauney_3D.html')
+
+#wm.plot_KDE_2D_enrg()
+
+X_a = wm.plot_KDE_2D_per_mol(wm.active_molecules,'Active')
+Y_a = wm.plot_KDE_2D_per_mol_enrg(wm.active_molecules,'Active')
+X_i = wm.plot_KDE_2D_per_mol(wm.inactive_molecules,'Active')
+Y_i = wm.plot_KDE_2D_per_mol_enrg(wm.inactive_molecules,'Active')
 
 
+dist_a = []
+enrg_delta_a = []
+for x, y in zip(X_a,Y_a):
+    if x < 10.0:
+        dist_a.append(x)
+        enrg_delta_a.append(y)
 
 
-#print(tot_mols)
+dist_i = []
+enrg_delta_i  = []
+for x, y in zip(X_i,Y_i):
+    if x < 10.0:
+        dist_i.append(x)
+        enrg_delta_i.append(y)
 
-clf = tree.DecisionTreeClassifier()
-clf = clf.fit(tot_mols[:, :-1], tot_mols[:,-1])
-dot_data = tree.export_graphviz(clf, out_file=None)
-graph = graphviz.Source(dot_data)
-graph.render("iris")
 
-dot_data = tree.export_graphviz(clf, out_file=None,
-                         #feature_names=iris.feature_names,
-                         #class_names=iris.target_names,
-                         filled=True, rounded=True,
-                         special_characters=True)
-graph = graphviz.Source(dot_data)
-graph.render("iris")
+fig = plt.figure(4)
+plt.clf()
+plt.cla()
+plt.scatter(dist_a,enrg_delta_a, label = 'Active' , s = 4)
+
+plt.scatter(dist_i,enrg_delta_i, label = 'Inactive', s = 4)
+plt.xlabel(r'$\AA$')
+plt.ylabel("Energy Delta")
+plt.title('Energy vs distance')
+plt.show()
+
+wm.get_per_protein_ctc()
+
 
 print(wm.get_com())
 
@@ -514,9 +770,6 @@ wm.plot_PCA_6D(wm.mols_distance_from_com(wm.active_molecules),wm.mols_distance_f
 
 a_pca, ia_pca = wm.get_molecules_from_PCA_area(-20,-3,-3,15)
 
-
-
-wm.get_per_protein_ctc()
 
 
 
