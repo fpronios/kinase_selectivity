@@ -1,7 +1,6 @@
 from xlrd import open_workbook
 from scipy.interpolate import spline
 
-from mayavi import mlab
 import matplotlib.tri as mtri
 import plotly
 from plotly.graph_objs import  Layout,Scatter3d
@@ -21,18 +20,194 @@ import scipy as sp
 from scipy import stats
 from matplotlib.widgets import CheckButtons
 import matplotlib.pyplot as plt
-#import seaborn as sns; sns.set()
+import seaborn as sns; sns.set()
 import matplotlib as mpl
 #mpl.style.use('classic')
 from sklearn.model_selection import cross_validate, KFold
 from sklearn import tree
 import graphviz
 #from sheatheer_jones import *
-from scipy.spatial import Delaunay
+#from scipy.spatial import Delaunay
 
 from rdf_pdf import * #pairCorrelationFunction_3D
 
 wb = open_workbook('watermap_statistical_xyz_analysis.xlsx')
+
+
+
+
+def kde2D(x, y, bandwidth,min_max= [0,1,0,1] , xbins=100j, ybins=100j,  **kwargs):
+    """Build 2D kernel density estimate (KDE)."""
+
+    # create grid of sample locations (default: 100x100)
+    xx, yy = np.mgrid[min_max[0]:min_max[1]:xbins,
+                        min_max[2]:min_max[3]:ybins]
+
+    xy_sample = np.vstack([yy.ravel(), xx.ravel()]).T
+    xy_train  = np.vstack([y, x]).T
+
+    kde_skl = KernelDensity(bandwidth=bandwidth, **kwargs)
+    kde_skl.fit(xy_train)
+
+    # score_samples() returns the log-likelihood of the samples
+    z = np.exp(kde_skl.score_samples(xy_sample))
+    return xx, yy, np.reshape(z, xx.shape)
+
+
+def get_axis_KDE( i_mol_obj, a_mol_obj, axis ,z_low= 1, z_high = 1 , com= [0,0,0]):
+
+
+
+    z_min = 500
+    z_max = -500
+    x_min = 500
+    x_max = -500
+    y_min = 500
+    y_max = -500
+
+    for mol in a_mol_obj:
+        if z_min > mol.z :
+            z_min = mol.z
+        if z_max < mol.z :
+            z_max = mol.z
+
+    for mol in a_mol_obj:
+        if x_min > mol.x :
+            x_min = mol.x
+        if x_max < mol.x :
+            x_max = mol.x
+
+    for mol in a_mol_obj:
+        if y_min > mol.y :
+            y_min = mol.y
+        if y_max < mol.y :
+            y_max = mol.y
+
+    for zz in range(int(z_max+abs(z_min))):
+        Xa, Ya = [], []
+        Xi, Yi = [], []
+
+        for mol in a_mol_obj:
+            if mol.z < z_min + zz +1 and mol.z > z_min + zz :
+                if axis == 'x':
+                    Xa.append(mol.x)
+                #elif axis == 'y':
+                    Ya.append(mol.y)
+                else:
+                    Xa.append(mol.z)
+
+        for mol in i_mol_obj:
+            if mol.z < z_min + zz +1 and mol.z > z_min + zz :
+                if axis == 'x':
+                    Xi.append(mol.x)
+                #elif axis == 'y':
+                    Yi.append(mol.y)
+                else:
+                    Xi.append(mol.z)
+
+        #fig, (ax1, ax2) = plt.subplots(1, 2)
+        xa, ya = np.asarray(Xa), np.asarray(Ya)
+        xi, yi = np.asarray(Xi), np.asarray(Yi)
+
+        # Set up the figure
+        if len(Xi) > 1 and len(Xa) > 1:
+            f, ax = plt.subplots(figsize=(8, 8))
+            ax.set_aspect("equal")
+
+            # Draw the two density plots
+            ax = sns.kdeplot(xi, yi,
+                             cmap="Reds", shade=True, shade_lowest=False, alpha = 0.65)
+            ax = plt.scatter(xi, yi, marker="+", c = 'r', label = "Inactive")
+            ax = sns.kdeplot(xa, ya,
+                             cmap="Blues", shade=True, shade_lowest=False , alpha = 0.65)
+            ax = plt.scatter(xa, ya, marker="+", c='b',  label = "Active")
+            ax = plt.title('$Z$ between [%0.2f, %0.2f] $\AA$, {mean = %0.2f}' % (z_min+zz ,z_min+zz + 1,com[2],))
+            ax = plt.ylabel("$Y$: $\AA$")
+            ax = plt.xlabel("$X$: $\AA$")
+
+            ax = plt.scatter(com[0], com[1], s=80,marker="+", facecolor='green' , label = 'Center of Mass')
+
+            plt.legend(loc='upper right')
+            plt.savefig("saved_figs/combined/comb_z_%d_%0.2f_%0.2f_.png" % (100+zz,z_min + zz, z_min + zz + 1,))
+            #plt.show()
+
+        sns.set(style="white")
+
+        if len(Xi) > 1 and len(Xa) > 1000:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 5))
+
+            len_xa, len_xi, len_ya, len_yi = len(Xa), len(Xi), len(Ya), len(Yi)
+            plt.suptitle('$Z$ between [%0.2f, %0.2f] $\AA$, {mean = %0.2f} \nNumber of Active : %d, Inactive : %d' % (z_min + zz, z_min + zz + 1,com[2],len_xa,len_xi,))
+
+            ax1 = sns.kdeplot(xa, color='b', label='Active', ax=ax1)
+            ax1 = sns.rugplot(xa, color='b', ax=ax1)
+            ax1 = sns.kdeplot(xi, color='r', label='Inactive', ax=ax1)
+            ax1 = sns.rugplot(xi, color='r', ax=ax1)
+            ax1 = sns.rugplot([com[0]], color='g', height=0.1, ax=ax1, label = 'Center of Mass')
+
+            #ax = plt.title('$Z$ in (%0.2f, %0.2f)' % (z_min + zz, z_min + zz + 1,))
+            ax2 = sns.kdeplot(ya, color='b', label='Active', ax=ax2)
+            ax2 = sns.rugplot(ya, color='b', ax=ax2)
+            ax2 = sns.kdeplot(yi, color='r', label='Inactive', ax=ax2)
+            ax2 = sns.rugplot(yi, color='r', ax=ax2)
+            ax2 = sns.rugplot([com[1]], color='g', height=0.1, ax=ax2 , label = 'Center of Mass')
+
+            ax1.set_title("$X$ axis")
+            ax1.set_ylabel("Density")
+            ax1.set_xlabel("$\AA$")
+            ax2.set_title("$Y$ axis")
+            ax2.set_xlabel("$\AA$")
+            ax1 = plt.legend(loc = 'upper right')
+            ax2 = plt.legend(loc = 'upper right')
+            #fig.
+            plt.subplots_adjust(left=0.05, bottom=None, right=0.95, top=0.8,
+                            wspace=None, hspace=None)
+
+            plt.savefig("saved_figs/xy_hist/comb_z_%d_%0.2f_%0.2f_.png" % (100+zz,z_min + zz, z_min + zz + 1,))
+            #plt.show()
+
+        if len(Xi) > 1 and len(Xa) > 1000:
+
+
+            g = sns.jointplot(xa, ya, kind="kde", size=8, space=0 )
+            g.plot_joint(plt.scatter, c="w", s=35, linewidth=1, marker="+")
+            g.ax_joint.collections[0].set_alpha(0)
+            g.fig.suptitle('$Z$ in (%0.2f, %0.2f)' % (z_min+zz ,z_min+zz + 1,))
+            g.set_axis_labels("$X$", "$Y$")
+            g.savefig("saved_figs/iso_levels/active_z_%d_%0.2f_%0.2f_.png" % (100+zz,z_min + zz, z_min + zz + 1,))
+            #plt.show()
+
+            g = sns.jointplot(xi, yi, kind="kde", size=8, space=0)
+            g.plot_joint(plt.scatter, c="w", s=35, linewidth=1, marker="+")
+            g.ax_joint.collections[0].set_alpha(0)
+            g.fig.suptitle('$Z$ in (%0.2f, %0.2f)' % (z_min + zz, z_min + zz + 1,))
+            g.set_axis_labels("$X$", "$Y$")
+            g.savefig("saved_figs/iso_levels/inactive_z_%d_%0.2f_%0.2f_.png" % (100+zz,z_min + zz, z_min + zz + 1,))
+
+    # sns.jointplot(x,y, kind="kde", size=7, space=0, ax=g , color='r')
+
+
+    # Silverman's Rule of Thumb
+    #BW = 1.06 * np.power(np.std(np.asarray(Xa), axis=0), -0.2) / 2
+
+    #xx, yy, zz = kde2D(x, y, BW *5, [x_min,x_max,y_min,y_max])
+    #fig, (ax1, ax2) = plt.subplots(1, 2)
+    #ax1.pcolormesh(xx, yy, zz)
+    #ax1.scatter(x, y, s=2, facecolor='white')
+    #ax1.scatter(com[0], com[1], s=4, facecolor='red')
+    #ax1.set_title("Active, z: ( %.2f ,%.2f )" %(z_low, z_high, ))
+    #ax1.set_xlim(x_min, x_max)
+    #ax1.set_ylim(y_min, y_max)
+    #plt.show()
+
+    #x, y = np.asarray(Xi), np.asarray(Yi)
+    #xx, yy, zz = kde2D(x, y, BW * 5, [x_min, x_max, y_min, y_max])
+    #ax2.pcolormesh(xx, yy, zz)
+    #ax2.set_title("Inactive, z: ( %.2f ,%.2f )" %(z_low, z_high, ))
+    #ax2.scatter(x, y, s=2, facecolor='white')
+    #ax2.scatter(com[0], com[1], s=4, facecolor='red')
+    #ax2.set_xlim(x_min,x_max)
+    #ax2.set_ylim(y_min, y_max)
 
 
 
@@ -338,7 +513,6 @@ class molecule_set:
         plt.title('KDE of H2O distances from center')
         plt.show()
 
-
     def get_PCF_ltt_by_prot(self,mol_obj, prot_names,label):
         xyz = self.get_com()
         for prot in prot_names:
@@ -437,7 +611,6 @@ class molecule_set:
         plt.legend(loc='upper left')
 
         return  X
-
 
     def plot_KDE_2D_per_mol_enrg(self, mol_obj, label):
         xyz = self.get_mean_enrg()
@@ -671,7 +844,7 @@ class molecule_set:
         for prot, i in enumerate(molecule_set.prot_names_act):
             usfl_act[i].append([mol for mol in molecule_set.active_molecules if (mol.protein_name == prot)])
 
-        print(usfl_act)
+
 
 wm = molecule_set()
 wm.load_dataset()
@@ -694,14 +867,50 @@ tot_mols[:inactive_rows,-1] = 0
 tot_mols[inactive_rows:,:-1] = wm.get_all_ext(wm.active_molecules)
 tot_mols[inactive_rows:,-1] = 1
 
+print([wm.get_com()[0],wm.get_com()[1],wm.get_com()[2]])
 
-#src = mlab.pipeline.scalar_field(tot_mols[inactive_rows:,:3])
+get_axis_KDE( wm.inactive_molecules, wm.active_molecules, 'x' , wm.get_com()[2] - 0.25 ,wm.get_com()[2] + 0.25,[wm.get_com()[0],wm.get_com()[1],wm.get_com()[2]])
+#get_axis_KDE( wm.inactive_molecules, axis = 'x')
+input = ("DONE")
+plt.show()
+from numpy import inf
+x[x == -inf] = 0
 
-mlab.pipeline.iso_surface(tot_mols[inactive_rows:,:3], opacity=0.4)
-#mlab.pipeline.iso_surface(src, contours=[s.max()-0.1*s.ptp(), ],)
+x1, y1 = np.meshgrid(xplot, yplot)
+print(xplot.shape)
+print(x1.shape)
+#print(np.vstack([xdens,ydens]).shape)
+print("**********************")
+#z = np.power(x1,2) + np.power(y1,2)
+xdens = np.tile(xdens,(500,1))
+ydens = ydens.T
 
-mlab.show()
+ydens = np.tile(ydens,(500,1))
 
+
+print(xdens.shape)
+print(ydens.shape)
+z = xdens + ydens.T
+#z = z * 100
+#z[z == -inf] = -0.01
+
+print("z_shape: ", z.shape)
+print("111111111111111111111111")
+print(z)
+#contours =
+plt.contour(x1, y1, z, 1000)
+
+#plt.scatter(x1,y1, c = z)
+plt.show()
+print("111111111111111111111111")
+
+#plt.clabel(contours, inline=True, fontsize=8)
+
+#plt.imshow(z, extent=[0, 5, 0, 5], origin='lower',
+   #        cmap='RdGy', alpha=0.5)
+
+#plt.colorbar()
+plt.show()
 #wm.get_PCF_ltt(wm.active_molecules, "Test")
 #wm.plot_PCF_by_prot()
 #wm.plot_PCF()
@@ -712,7 +921,8 @@ mlab.show()
 
 #wm.prot_names_act = prot_names_act
 #wm.prot_names_inact = prot_names_inact
-tri = Delaunay(tot_mols[inactive_rows:,:-4], 3)
+
+#tri = Delaunay(tot_mols[inactive_rows:,:-4], 3)
 
 #print(tri.simplices)
 
@@ -770,6 +980,7 @@ wm.plot_PCA_6D(wm.mols_distance_from_com(wm.active_molecules),wm.mols_distance_f
 #wm.plot_LDA(wm.active_molecules,wm.inactive_molecules)
 
 a_pca, ia_pca = wm.get_molecules_from_PCA_area(-20,-3,-3,15)
+
 
 
 
