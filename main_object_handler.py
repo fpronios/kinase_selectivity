@@ -1,7 +1,7 @@
 from xlrd import open_workbook
 from scipy.interpolate import spline
+import plotly
 
-import matplotlib.tri as mtri
 import plotly
 from plotly.graph_objs import  Layout,Scatter3d
 from mpl_toolkits.mplot3d import proj3d
@@ -22,12 +22,13 @@ from matplotlib.widgets import CheckButtons
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
 import matplotlib as mpl
-#mpl.style.use('classic')
 from sklearn.model_selection import cross_validate, KFold
 from sklearn import tree
 import graphviz
+
 #from sheatheer_jones import *
 #from scipy.spatial import Delaunay
+#mpl.style.use('classic')
 
 from rdf_pdf import * #pairCorrelationFunction_3D
 
@@ -844,6 +845,56 @@ class molecule_set:
         for prot, i in enumerate(molecule_set.prot_names_act):
             usfl_act[i].append([mol for mol in molecule_set.active_molecules if (mol.protein_name == prot)])
 
+    def get_n_closest_by_prot(self,mol_obj, act = True,n = 25):
+        molecule_set.prot_names_act = list(set([prot.prot_name for prot in molecule_set.active_molecules]))
+        molecule_set.prot_names_inact = list(set([prot.prot_name for prot in molecule_set.inactive_molecules]))
+        if act:
+            prot_names = molecule_set.prot_names_act
+        else:
+            prot_names = molecule_set.prot_names_inact
+
+        xyz = self.get_com()
+        n_by_prot = []
+        for prot in prot_names:
+            X = []
+            IDX = []
+            for idx, mol in enumerate(mol_obj):
+                b = np.array([mol.x, mol.y, mol.z])
+                # print(b)
+                dist = np.linalg.norm(xyz - b)
+                X.append(dist)
+                IDX.append(idx)
+
+            #x_np = np.asarray(X)
+            #idx_np = np.asarray(IDX)
+
+            Z = [x for _, x in sorted(zip(X, IDX))]
+            IDX = Z
+
+            mols_ltt = len(X)
+            mol_pcf = [[] for i in range(mols_ltt)]
+            n_test = 0
+            for idx, mol in enumerate(mol_obj):
+                if idx in IDX:
+                    for idx_inner, mol_inner in enumerate(mol_obj):
+                        if n_test < n and idx_inner in IDX and idx_inner != idx and mol_inner.prot_name == mol.prot_name and mol.prot_name == prot:
+                            a = np.array([mol_inner.x, mol_inner.y, mol_inner.z])
+                            mol_pcf[IDX.index(idx)].append(a)
+                            n_test += 1
+            to_remove = []
+            for idx,  mol_empty_test in enumerate(mol_pcf):
+                if len(mol_empty_test)==0:
+                    #print(idx)
+                    to_remove.append(idx)
+
+            mol_pcf = [i for j, i in enumerate(mol_pcf) if j not in to_remove]
+
+            X = np.array(mol_pcf)
+            #print("N closest mols %s" % prot)
+            #print(X)
+            n_by_prot.append(X)
+
+        return n_by_prot
 
 
 wm = molecule_set()
@@ -854,7 +905,44 @@ center = np.mean(wm.get_xyz('all'),axis=0)
 #print ('Center: ', center)
 
 
+def mayavi_3d_density(wm):
+    xi, yi, zi = wm.get_xyz_ext(wm.mols_distance_from_com(
+        wm.inactive_molecules)).T  # tot_mols[:inactive_rows, 0],tot_mols[:inactive_rows, 1],tot_mols[:inactive_rows, 2]
+    xa, ya, za = wm.get_xyz_ext(wm.mols_distance_from_com(
+        wm.active_molecules)).T  # tot_mols[inactive_rows:, 0],tot_mols[inactive_rows:, 1],tot_mols[inactive_rows:, 2]
 
+    import hdbscan
+
+    from scipy import stats
+    from mayavi import mlab
+    kde = stats.gaussian_kde(wm.get_xyz_ext(wm.mols_distance_from_com(wm.active_molecules)).T)
+
+    density = kde(wm.get_xyz_ext(wm.mols_distance_from_com(wm.active_molecules)).T)
+
+    # Plot scatter with mayavi
+    figure = mlab.figure('DensityPlot')
+    pts = mlab.points3d(xa, ya, za, density, scale_mode='none', scale_factor=1)
+    mlab.axes()
+    mlab.show()
+
+    density = kde(wm.get_xyz_ext(wm.mols_distance_from_com(wm.inactive_molecules)).T)
+    # Evaluate kde on a grid
+    xmin, ymin, zmin = xi.min(), yi.min(), zi.min()
+    xmax, ymax, zmax = xi.max(), yi.max(), zi.max()
+    xi, yi, zi = np.mgrid[xmin:xmax:30j, ymin:ymax:30j, zmin:zmax:30j]
+    coords = np.vstack([item.ravel() for item in [xi, yi, zi]])
+    density = kde(coords).reshape(xi.shape)
+
+    # Plot scatter with mayavi
+    figure = mlab.figure('DensityPlot')
+
+    grid = mlab.pipeline.scalar_field(xi, yi, zi, density)
+    min = density.min()
+    max = density.max()
+    mlab.pipeline.volume(grid, vmin=min, vmax=min + .5 * (max - min))
+
+    mlab.axes()
+    mlab.show()
 
 inactive_rows = wm.get_all_ext(wm.inactive_molecules).shape[0]
 inactive_cols = wm.get_all_ext(wm.inactive_molecules).shape[1]
@@ -869,68 +957,135 @@ tot_mols[inactive_rows:,-1] = 1
 
 print([wm.get_com()[0],wm.get_com()[1],wm.get_com()[2]])
 
-get_axis_KDE( wm.inactive_molecules, wm.active_molecules, 'x' , wm.get_com()[2] - 0.25 ,wm.get_com()[2] + 0.25,[wm.get_com()[0],wm.get_com()[1],wm.get_com()[2]])
 #get_axis_KDE( wm.inactive_molecules, axis = 'x')
+from plotly.graph_objs import  Layout,Scatter3d, Marker,Mesh3d, Figure,Data
+
+
+
+
+def chain_grouping(n_cl):
+    n = len(n_cl[0][0])
+
+    #for prot in n_cl:
+    #print(len(n_cl[1][0]))
+    #    print("&&&&&&&&&&&&&&&&&&&&&    ")
+     #   print(prot[0])
+    distance_list = [[0 for j in range(len(n_cl))] for i in range(n)]
+    xyz_list = [[0 for j in range(len(n_cl))] for i in range(n)]
+    for mol in range(n):
+        for en, prot in enumerate(n_cl):
+            compare_to = prot[0][mol]
+            min = 1111
+            for mol_search in range(n):
+                b = prot[0][mol_search]
+                #print("To test:", b)
+                #print("Compare to: ", compare_to)
+                dist = np.linalg.norm(compare_to - b)
+                if dist < min and dist != 0.0:
+                    min = dist
+                    distance_list[mol][en] = dist
+                    xyz_list[mol][en] = b
+
+
+    #print(len(distance_list[0][0]))
+    pre_mean_list = []
+    for i in range(n):
+        #print(distance_list[i])
+        #print(xyz_list[i])
+        pre_mean_list.append(np.asarray(xyz_list[i]))
+
+    mean_lst = []
+    for i in range(n):
+
+        mean_lst.append(np.mean(pre_mean_list[i], axis = 0))
+
+    #print(mean_lst[0])
+    #print(mean_lst[1])
+    mean_np = np.asarray(mean_lst)
+    #print(mean_np)
+    return mean_np#group_com
+
+#######
+n_closest = wm.get_n_closest_by_prot(wm.active_molecules,act= True, n = 25)
+mean_act = chain_grouping(n_closest)
+
+n_closest = wm.get_n_closest_by_prot(wm.inactive_molecules,act= False, n = 25)
+mean_inact = chain_grouping(n_closest)
+
+#mean_act = np.load("mean_act.npy")
+#mean_inact = np.load("mean_inact.npy")
+np.save("mean_act",mean_act)
+np.save("mean_inact",mean_inact)
+print(np.shape(mean_act))
+print(np.shape(mean_inact))
+
+xa, ya, za = mean_act[:, 0],mean_act[:, 1],mean_act[:, 2]
+xi, yi, zi = mean_inact[:, 0],mean_inact[:, 1],mean_inact[:, 2]
+
+print()
+
+alpha = 4
+global_opacity = 0.6
+#print(wm.get_xyz_ext(wm.mols_distance_from_com(wm.inactive_molecules,"NONE")))
+
+
 input = ("DONE")
-plt.show()
-from numpy import inf
-x[x == -inf] = 0
+pointsi=Scatter3d(mode = 'markers',
+                 name = 'active_points',
+                 x =xi,
+                 y= yi,
+                 z= zi,
+                 marker = Marker( size=4, color='#458B00' )
+)
+simplexesi = Mesh3d(alphahull = alpha,
+                   name = 'active_simplexes',
+                   x =xi,
+                   y= yi,
+                   z= zi,
+                   color='rgba(25,100,255, 0.5)', #set the color of simplexes in alpha shape
+                   opacity=global_opacity
+)
+pointsa=Scatter3d(mode = 'markers',
+                 name = 'inactive_points',
+                 x =xa,
+                 y= ya,
+                 z= za,
+                 marker = Marker( size=4, color='#FF8B00' )
+)
+simplexesa = Mesh3d(alphahull = alpha,
+                   name = 'inactive_simplexes',
+                   x =xa,
+                   y= ya,
+                   z= za,
+                   color='rgba(255,0,0, 0.5)', #set the color of simplexes in alpha shape
+                   opacity=global_opacity
+)
+#x_style = dict( zeroline=False, range=[-2.85, 4.25], tickvals=np.linspace(-2.85, 4.25, 5)[1:].round(1))
+#y_style = dict( zeroline=False, range=[-2.65, 1.32], tickvals=np.linspace(-2.65, 1.32, 4)[1:].round(1))
+#z_style = dict( zeroline=False, range=[-3.67,1.4], tickvals=np.linspace(-3.67, 1.4, 5).round(1))
+layout=Layout(title='Alpha shape of Active vs Inactive proteins alpha = %d' % alpha#,
+              #width=1200,
+             #height=1000
+              #scene = Scene(
+              #xaxis = x_style,
+              #yaxis = y_style,
+              #zaxis = z_style
+            # )
+             )
+fig1=Figure(data=Data([pointsi, simplexesi,pointsa, simplexesa]), layout=layout)
+#fig1 = go.Figure(data=data1, layout=layout)
+plotly.offline.plot(fig1, filename='plotly_out/alpha_shape_a_%d_op_%0.2f_n_close.html' % (alpha,global_opacity,))
 
-x1, y1 = np.meshgrid(xplot, yplot)
-print(xplot.shape)
-print(x1.shape)
-#print(np.vstack([xdens,ydens]).shape)
-print("**********************")
-#z = np.power(x1,2) + np.power(y1,2)
-xdens = np.tile(xdens,(500,1))
-ydens = ydens.T
-
-ydens = np.tile(ydens,(500,1))
+print(wm.get_com())
 
 
-print(xdens.shape)
-print(ydens.shape)
-z = xdens + ydens.T
-#z = z * 100
-#z[z == -inf] = -0.01
 
-print("z_shape: ", z.shape)
-print("111111111111111111111111")
-print(z)
-#contours =
-plt.contour(x1, y1, z, 1000)
 
-#plt.scatter(x1,y1, c = z)
-plt.show()
-print("111111111111111111111111")
+"""
 
-#plt.clabel(contours, inline=True, fontsize=8)
+get_axis_KDE( wm.inactive_molecules, wm.active_molecules, 'x' , wm.get_com()[2] - 0.25 ,wm.get_com()[2] + 0.25,[wm.get_com()[0],wm.get_com()[1],wm.get_com()[2]])
 
-#plt.imshow(z, extent=[0, 5, 0, 5], origin='lower',
-   #        cmap='RdGy', alpha=0.5)
-
-#plt.colorbar()
-plt.show()
-#wm.get_PCF_ltt(wm.active_molecules, "Test")
-#wm.plot_PCF_by_prot()
-#wm.plot_PCF()
-
-#wm.get_per_protein_ctc()
-#prot_names_inact = list(set([prot.prot_name for prot in wm.inactive_molecules]))
-#prot_names_act = list(set([prot.prot_name for prot in wm.active_molecules]))
-
-#wm.prot_names_act = prot_names_act
-#wm.prot_names_inact = prot_names_inact
-
-#tri = Delaunay(tot_mols[inactive_rows:,:-4], 3)
-
-#print(tri.simplices)
-
-#layout = dict(title = 'Active RDF')
-#fig = dict(data = (points[:,0], points[:,1], tri.simplices.copy()), layout = layout)
-#plotly.offline.plot(fig, filename='delauney_3D.html')
-
-#wm.plot_KDE_2D_enrg()
+wm.get_per_protein_ctc()
 
 X_a = wm.plot_KDE_2D_per_mol(wm.active_molecules,'Active')
 Y_a = wm.plot_KDE_2D_per_mol_enrg(wm.active_molecules,'Active')
@@ -965,25 +1120,6 @@ plt.ylabel("Energy Delta")
 plt.title('Energy vs distance')
 plt.show()
 
-wm.get_per_protein_ctc()
-
-
-print(wm.get_com())
-
-wm.plot_KDE_2D()
-
-wm.plot_PCA_6D(wm.active_molecules,wm.inactive_molecules)
-
-
-wm.plot_PCA_6D(wm.mols_distance_from_com(wm.active_molecules),wm.mols_distance_from_com(wm.inactive_molecules))
-
-#wm.plot_LDA(wm.active_molecules,wm.inactive_molecules)
-
-a_pca, ia_pca = wm.get_molecules_from_PCA_area(-20,-3,-3,15)
-
-
-
-
 
 
 np_a_pca = wm.get_all_ext(a_pca)
@@ -1011,3 +1147,49 @@ axarr[0].hist(np_ia_pca[:,3], 50, normed=1,  alpha=0.75)
 axarr[1].hist(np_ia_pca[:,4], 50, normed=1,  alpha=0.75)
 axarr[2].hist(np_ia_pca[:,5], 50, normed=1,  alpha=0.75)
 plt.show()
+
+"""
+
+
+
+#wm.get_PCF_ltt(wm.active_molecules, "Test")
+#wm.plot_PCF_by_prot()
+#wm.plot_PCF()
+
+#wm.get_per_protein_ctc()
+#prot_names_inact = list(set([prot.prot_name for prot in wm.inactive_molecules]))
+#prot_names_act = list(set([prot.prot_name for prot in wm.active_molecules]))
+
+#wm.prot_names_act = prot_names_act
+#wm.prot_names_inact = prot_names_inact
+
+#tri = Delaunay(tot_mols[inactive_rows:,:-4], 3)
+
+#print(tri.simplices)
+
+#layout = dict(title = 'Active RDF')
+#fig = dict(data = (points[:,0], points[:,1], tri.simplices.copy()), layout = layout)
+#plotly.offline.plot(fig, filename='delauney_3D.html')
+
+#wm.plot_KDE_2D_enrg()
+
+
+#wm.plot_KDE_2D()
+
+#wm.plot_PCA_6D(wm.active_molecules,wm.inactive_molecules)
+
+
+#wm.plot_PCA_6D(wm.mols_distance_from_com(wm.active_molecules),wm.mols_distance_from_com(wm.inactive_molecules))
+
+#wm.plot_LDA(wm.active_molecules,wm.inactive_molecules)
+
+#a_pca, ia_pca = wm.get_molecules_from_PCA_area(-20,-3,-3,15)
+
+
+#plotly.offline.plot({
+#    "data": [Scatter3d(x=x, y=y,z=z, marker = dict(color = density), mode = 'markers')],
+#
+#    "layout": Layout(title="Active protein water molecules heatmap")
+#})
+
+#plt.show()
